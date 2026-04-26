@@ -3,11 +3,9 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Update
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime
 from aiohttp import web
-import os
-import sys
 from config import TOKEN
 from database import db
 
@@ -36,10 +34,6 @@ class FilterByCategoryStates(StatesGroup):
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-# Получаем URL от Render (он сам подставляет переменную окружения)
-RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
-PORT = int(os.getenv("PORT", 8000))
 
 # ================== КЛАВИАТУРЫ ==================
 
@@ -447,76 +441,27 @@ async def export_data(message: types.Message):
         reply_markup=main_keyboard
     )
 
-# ================== WEBHOOK ENDPOINTS ==================
-
-async def webhook(request):
-    """Обработка входящих обновлений от Telegram"""
-    try:
-        data = await request.json()
-        update = Update(**data)
-        await dp.feed_update(bot, update)
-        return web.Response(status=200)
-    except Exception as e:
-        print(f"Ошибка в webhook: {e}")
-        return web.Response(status=200)  # Всегда отвечаем 200 Telegram
+# ================== ВЕБ-СЕРВЕР ==================
 
 async def health_check(request):
-    """Проверка здоровья для Render"""
     return web.Response(text="OK", status=200)
 
-async def on_startup():
-    """Действия при запуске приложения"""
-    await db.connect()
-    print("🤖 Бот запущен...")
-
-    # Устанавливаем вебхук только если есть URL
-    if RENDER_EXTERNAL_URL:
-        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
-        await bot.set_webhook(webhook_url)
-        print(f"✅ Webhook установлен: {webhook_url}")
-    else:
-        print("⚠️ RENDER_EXTERNAL_URL не найден, работаем в режиме polling")
-        # Если локально, запускаем polling
-        asyncio.create_task(dp.start_polling(bot))
-
-async def on_shutdown():
-    """Действия при остановке"""
-    # Удаляем вебхук при остановке
-    await bot.delete_webhook()
-    await db.close()
-    print("👋 Бот остановлен")
-
-# ================== ЗАПУСК WEB-СЕРВЕРА ==================
-
-async def main():
-    # Создаем aiohttp приложение
+async def start_web_server():
     app = web.Application()
-    app.router.add_post('/webhook', webhook)
     app.router.add_get('/health', health_check)
-    
-    # Добавляем startup/shutdown хуки
-    app.on_startup.append(lambda _: on_startup())
-    app.on_shutdown.append(lambda _: on_shutdown())
-    
-    # Запускаем веб-сервер
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
-    
-    print(f"🌐 Веб-сервер запущен на порту {PORT}")
-    print(f"🔗 Health check: http://0.0.0.0:{PORT}/health")
-    print(f"🔗 Webhook endpoint: http://0.0.0.0:{PORT}/webhook")
-    
-    # Держим приложение запущенным
-    try:
-        while True:
-            await asyncio.sleep(3600)  # Спим час
-    except KeyboardInterrupt:
-        print("\n🛑 Остановка...")
-        await runner.cleanup()
+    print("🌐 Веб-сервер запущен на порту 8000")
+
+# ================== ЗАПУСК ==================
+
+async def main():
+    await db.connect()
+    asyncio.create_task(start_web_server())
+    print("🤖 Бот запущен...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
