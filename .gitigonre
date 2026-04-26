@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+.env
+money_tracker.db
+*.txt
+.DS_Store
