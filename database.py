@@ -15,6 +15,7 @@ class Database:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
                     id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
                     amount REAL NOT NULL,
                     category TEXT NOT NULL,
                     description TEXT,
@@ -23,66 +24,74 @@ class Database:
                 )
             ''')
 
-    async def add_transaction(self, amount, category, description, transaction_type):
+    async def add_transaction(self, user_id, amount, category, description, transaction_type):
         date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         async with self.pool.acquire() as conn:
             await conn.execute('''
-                INSERT INTO transactions (amount, category, description, date, type)
-                VALUES ($1, $2, $3, $4, $5)
-            ''', amount, category, description, date, transaction_type)
+                INSERT INTO transactions (user_id, amount, category, description, date, type)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            ''', user_id, amount, category, description, date, transaction_type)
 
-    async def get_all_transactions(self):
+    async def get_all_transactions(self, user_id):
         async with self.pool.acquire() as conn:
-            return await conn.fetch('SELECT * FROM transactions ORDER BY date DESC')
+            return await conn.fetch(
+                'SELECT * FROM transactions WHERE user_id = $1 ORDER BY date DESC',
+                user_id)
 
-    async def get_transactions_by_category(self, transaction_type='расход'):
+    async def get_transactions_by_category(self, user_id, transaction_type='расход'):
         async with self.pool.acquire() as conn:
             return await conn.fetch('''
                 SELECT category, SUM(amount) as total
-                FROM transactions WHERE type = $1
+                FROM transactions WHERE user_id = $1 AND type = $2
                 GROUP BY category ORDER BY total DESC
-            ''', transaction_type)
+            ''', user_id, transaction_type)
 
-    async def get_total_expenses(self):
+    async def get_total_expenses(self, user_id):
         async with self.pool.acquire() as conn:
             result = await conn.fetchval(
-                "SELECT SUM(amount) FROM transactions WHERE type = 'расход'")
+                "SELECT SUM(amount) FROM transactions WHERE user_id = $1 AND type = 'расход'",
+                user_id)
             return result or 0
 
-    async def get_total_income(self):
+    async def get_total_income(self, user_id):
         async with self.pool.acquire() as conn:
             result = await conn.fetchval(
-                "SELECT SUM(amount) FROM transactions WHERE type = 'доход'")
+                "SELECT SUM(amount) FROM transactions WHERE user_id = $1 AND type = 'доход'",
+                user_id)
             return result or 0
 
-    async def get_balance(self):
-        return await self.get_total_income() - await self.get_total_expenses()
+    async def get_balance(self, user_id):
+        return await self.get_total_income(user_id) - await self.get_total_expenses(user_id)
 
-    async def get_transactions_by_date(self, days=None):
+    async def get_transactions_by_date(self, user_id, days=None):
         async with self.pool.acquire() as conn:
             if days is None:
-                return await conn.fetch('SELECT * FROM transactions ORDER BY date DESC')
+                return await conn.fetch(
+                    'SELECT * FROM transactions WHERE user_id = $1 ORDER BY date DESC',
+                    user_id)
             date_threshold = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
             return await conn.fetch('''
-                SELECT * FROM transactions WHERE date >= $1 ORDER BY date DESC
-            ''', date_threshold)
+                SELECT * FROM transactions WHERE user_id = $1 AND date >= $2 ORDER BY date DESC
+            ''', user_id, date_threshold)
 
-    async def get_transactions_by_category_filtered(self, category, transaction_type):
+    async def get_transactions_by_category_filtered(self, user_id, category, transaction_type):
         async with self.pool.acquire() as conn:
             return await conn.fetch('''
-                SELECT * FROM transactions WHERE category = $1 AND type = $2
+                SELECT * FROM transactions WHERE user_id = $1 AND category = $2 AND type = $3
                 ORDER BY date DESC
-            ''', category, transaction_type)
+            ''', user_id, category, transaction_type)
 
-    async def delete_transaction(self, transaction_id):
+    async def delete_transaction(self, user_id, transaction_id):
         async with self.pool.acquire() as conn:
-            await conn.execute('DELETE FROM transactions WHERE id = $1', transaction_id)
+            await conn.execute(
+                'DELETE FROM transactions WHERE id = $1 AND user_id = $2',
+                transaction_id, user_id)
 
-    async def export_to_text(self):
-        transactions = await self.get_all_transactions()
-        total_income = await self.get_total_income()
-        total_expenses = await self.get_total_expenses()
-        balance = await self.get_balance()
+    async def export_to_text(self, user_id):
+        transactions = await self.get_all_transactions(user_id)
+        total_income = await self.get_total_income(user_id)
+        total_expenses = await self.get_total_expenses(user_id)
+        balance = await self.get_balance(user_id)
 
         text = "=" * 50 + "\nОТЧЁТ О ФИНАНСАХ\n" + "=" * 50 + "\n\n"
         text += f"📅 Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
