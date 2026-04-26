@@ -508,6 +508,7 @@ async def start_web_server():
 
 async def main():
     """Запуск бота с веб-сервером"""
+    await db.connect()
     # Запускаем веб-сервер
     web_task = asyncio.create_task(start_web_server())
     
