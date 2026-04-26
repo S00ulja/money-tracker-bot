@@ -1,6 +1,6 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -139,8 +139,9 @@ async def process_expense_category(message: types.Message, state: FSMContext):
 async def process_expense_description(message: types.Message, state: FSMContext):
     description = None if message.text == "-" else message.text
     data = await state.get_data()
+    user_id = message.from_user.id
 
-    await db.add_transaction(data['amount'], data['category'], description, "расход")
+    await db.add_transaction(user_id, data['amount'], data['category'], description, "расход")
     await state.clear()
 
     response = "✅ Расход добавлен!\n\n"
@@ -194,8 +195,9 @@ async def process_income_category(message: types.Message, state: FSMContext):
 async def process_income_description(message: types.Message, state: FSMContext):
     description = None if message.text == "-" else message.text
     data = await state.get_data()
+    user_id = message.from_user.id
 
-    await db.add_transaction(data['amount'], data['category'], description, "доход")
+    await db.add_transaction(user_id, data['amount'], data['category'], description, "доход")
     await state.clear()
 
     response = "✅ Доход добавлен!\n\n"
@@ -209,21 +211,22 @@ async def process_income_description(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "📊 Статистика")
 async def show_statistics(message: types.Message):
-    total_expenses = await db.get_total_expenses()
-    total_income = await db.get_total_income()
+    user_id = message.from_user.id
+    total_expenses = await db.get_total_expenses(user_id)
+    total_income = await db.get_total_income(user_id)
 
     response = "📊 СТАТИСТИКА\n\n"
     response += f"💚 Доход: {total_income} р.\n"
     response += f"❌ Расходы: {total_expenses} р.\n\n"
 
-    expense_cats = await db.get_transactions_by_category('расход')
+    expense_cats = await db.get_transactions_by_category(user_id, 'расход')
     if expense_cats:
         response += "💸 РАСХОДЫ ПО КАТЕГОРИЯМ:\n"
         for row in expense_cats:
             response += f"  • {row['category']}: {row['total']} р.\n"
         response += "\n"
 
-    income_cats = await db.get_transactions_by_category('доход')
+    income_cats = await db.get_transactions_by_category(user_id, 'доход')
     if income_cats:
         response += "💚 ДОХОДЫ ПО КАТЕГОРИЯМ:\n"
         for row in income_cats:
@@ -235,9 +238,10 @@ async def show_statistics(message: types.Message):
 
 @dp.message(F.text == "💰 Баланс")
 async def show_balance(message: types.Message):
-    income = await db.get_total_income()
-    expenses = await db.get_total_expenses()
-    balance = await db.get_balance()
+    user_id = message.from_user.id
+    income = await db.get_total_income(user_id)
+    expenses = await db.get_total_expenses(user_id)
+    balance = await db.get_balance(user_id)
 
     response = "💰 БАЛАНС\n\n"
     response += f"💚 Доход: {income} р.\n"
@@ -257,7 +261,8 @@ async def show_balance(message: types.Message):
 
 @dp.message(F.text == "📋 История")
 async def show_history(message: types.Message):
-    transactions = await db.get_all_transactions()
+    user_id = message.from_user.id
+    transactions = await db.get_all_transactions(user_id)
 
     if not transactions:
         await message.answer("📋 История пуста!", reply_markup=main_keyboard)
@@ -278,7 +283,8 @@ async def show_history(message: types.Message):
 
 @dp.message(F.text == "🗑️ Удалить запись")
 async def start_delete(message: types.Message, state: FSMContext):
-    transactions = await db.get_all_transactions()
+    user_id = message.from_user.id
+    transactions = await db.get_all_transactions(user_id)
 
     if not transactions:
         await message.answer("📋 Нет записей для удаления!", reply_markup=main_keyboard)
@@ -300,7 +306,7 @@ async def process_delete(message: types.Message, state: FSMContext):
         return
     try:
         trans_id = int(message.text)
-        await db.delete_transaction(trans_id)
+        await db.delete_transaction(message.from_user.id, trans_id)
         await state.clear()
         await message.answer("✅ Запись удалена!", reply_markup=main_keyboard)
     except ValueError:
@@ -320,17 +326,19 @@ async def process_date_filter(message: types.Message, state: FSMContext):
         await message.answer("❌ Фильтр отменён.", reply_markup=main_keyboard)
         return
 
+    user_id = message.from_user.id
+
     if message.text == "📅 За сегодня":
-        transactions = await db.get_transactions_by_date(1)
+        transactions = await db.get_transactions_by_date(user_id, 1)
         period = "за сегодня"
     elif message.text == "📅 За неделю":
-        transactions = await db.get_transactions_by_date(7)
+        transactions = await db.get_transactions_by_date(user_id, 7)
         period = "за неделю"
     elif message.text == "📅 За месяц":
-        transactions = await db.get_transactions_by_date(30)
+        transactions = await db.get_transactions_by_date(user_id, 30)
         period = "за месяц"
     elif message.text == "📅 За всё время":
-        transactions = await db.get_all_transactions()
+        transactions = await db.get_all_transactions(user_id)
         period = "за всё время"
     else:
         await message.answer("❌ Выбери из предложенных вариантов:")
@@ -357,8 +365,9 @@ async def process_date_filter(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🔍 По категории")
 async def start_category_filter(message: types.Message, state: FSMContext):
-    expense_cats = await db.get_transactions_by_category('расход')
-    income_cats = await db.get_transactions_by_category('доход')
+    user_id = message.from_user.id
+    expense_cats = await db.get_transactions_by_category(user_id, 'расход')
+    income_cats = await db.get_transactions_by_category(user_id, 'доход')
 
     if not expense_cats and not income_cats:
         await message.answer("📋 Нет транзакций!", reply_markup=main_keyboard)
@@ -391,10 +400,11 @@ async def process_category_filter(message: types.Message, state: FSMContext):
         await message.answer("❌ Фильтр отменён.", reply_markup=main_keyboard)
         return
 
+    user_id = message.from_user.id
     category = message.text.replace("❌ ", "").replace("💚 ", "").strip()
 
-    expense_trans = await db.get_transactions_by_category_filtered(category, 'расход')
-    income_trans = await db.get_transactions_by_category_filtered(category, 'доход')
+    expense_trans = await db.get_transactions_by_category_filtered(user_id, category, 'расход')
+    income_trans = await db.get_transactions_by_category_filtered(user_id, category, 'доход')
     transactions = list(expense_trans) + list(income_trans)
 
     await state.clear()
@@ -421,7 +431,8 @@ async def process_category_filter(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "📥 Экспорт")
 async def export_data(message: types.Message):
-    text_content = await db.export_to_text()
+    user_id = message.from_user.id
+    text_content = await db.export_to_text(user_id)
     filename = f"finance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
     await message.answer_document(
